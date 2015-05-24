@@ -1,0 +1,145 @@
+---
+title: "Prediction of Weight Lifting Form"
+author: "Scott Delaney"
+date: "20 March 2015"
+output: html_document
+---
+
+##Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+This paper describes and documents the use of a training set of data to determine and build a model capable of predicting the classe of form used during a lift. The model described in this paper was used to correctly predict and identify the form for a set of twenty lifts in a held back quiz set of data.
+
+##Required Libraries
+The following libraries are in this exercise and hence required to be loaded. Additionally a seed is set to allow reproducability (should it be required).
+
+```{r, echo=TRUE}
+
+library(caret)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+set.seed(291070)
+
+```
+
+##Sourcing the Data
+The data used in this exercise was gathered from the online source and saved locally before loading:
+
+```{r, echo=TRUE}
+
+traindata  <- read.csv("pml-training.csv", na.strings=c("NA","#DIV/0!",""))
+testdata <- read.csv("pml-testing.csv", na.strings=c("NA","#DIV/0!",""))
+
+```
+
+##Pre-processing
+As we have visibility of the set of data we are attempting to predict for, as well as the training set, we can do some pre-processing of data (based on observations of completeness and the like) in order to remove features which are unlikely to contribute to the prediction.
+
+``` {r, echo=TRUE}
+
+## find the columns in the set we'll be tested against which are empty
+## they'll be of no use in this case
+colMeans(is.na(testdata)) > .99
+
+## drop the columns that won't contribute
+
+finalTest <- testdata[, colMeans(is.na(testdata)) < 1]
+## now drop those same columns from the training data
+finalTrain <- traindata[, colMeans(is.na(testdata)) < 1]
+
+```
+
+
+Having performed some pre-processing, the data was split into training and testing set in order that an out of sample estimate of error can later be achieved.
+
+``` {r, echo=TRUE}
+
+inTrain <- createDataPartition(y=finalTrain$classe, p=0.6, list=FALSE)
+trainingSet <- finalTrain[inTrain, ]
+testingSet <- finalTrain[-inTrain, ]
+dim(trainingSet)
+dim(testingSet)
+
+```
+
+Any columns with zero, or very close to zero, variance are also unlikely to contribute to the accuracy of the prediction model and as such could be removed. Also, fields which are simply artifical keys to identify rows will be of no value. Hence the following check (and subsequent removal are performed):
+
+``` {r, echo=TRUE}
+
+## check to see if there are any columns which have low variance
+lowVarianceCols <- nearZeroVar(trainingSet, saveMetrics=TRUE)
+lowVarianceCols
+## the new window column appears to have near zero varience so lets remove it
+lowVarianceCols <- nearZeroVar(trainingSet, saveMetrics=FALSE)
+finalTrainingSet <- trainingSet[c(-lowVarianceCols)]
+## also take it out of the testing set
+testingSet <- testingSet[c(-6)]
+## take the id row (x) out of both sets too
+finalTrainingSet <- finalTrainingSet[c(-1)]
+testingSet <- testingSet[c(-1)]
+
+```
+
+## Fitting a Model
+Having prepared the data, we attempt to apply a decision tree style model, using rpart. 
+
+``` {r, echo=TRUE}
+
+rpFit <- train(classe ~., method="rpart",data=finalTrainingSet)
+
+
+
+```
+
+Which yields the following model:
+
+``` {r, echo=TRUE}
+
+print(rpFit$finalModel)
+fancyRpartPlot(rpFit$finalModel)
+
+
+```
+
+This model is now used to predict the values in the testing set we split off earlier.
+
+``` {r, echo=TRUE}
+
+## let's try it on the testing data
+predictedValues <- predict(rpFit,newdata=testingSet)
+
+## so how did we do
+confusionMatrix(predictedValues, testingSet$classe)
+
+```
+
+The results, whilst better than simply guessing, are still too low be of practical use. 
+
+An alternate modelling approach is now applied. The use of random forests in an attempt to increase the accuracy.
+
+In order to speed execution, the number of trees in the random forest was limited to 600. Validating the trace output, we can see that no relevant improvement in model performance occurs after about 500 trees.
+
+``` {r, echo=TRUE}
+
+rfFit <- randomForest(classe ~., data=finalTrainingSet, mtry=3, ntree=600, prox=TRUE, do.trace=25)
+
+rfFit
+
+```
+
+
+Evaluating its results gives:
+
+``` {r, echo=TRUE}
+
+predictedValues <- predict(rfFit,newdata=testingSet)
+confusionMatrix(predictedValues, testingSet$classe)
+
+```
+
+
+This is a much more useful result, giving an out of sample of error of under 0.5% 
+
+As such, this model will be used to predict the values from the held back quiz set. 
